@@ -82,7 +82,7 @@ def load_data():
                ANALYZED_AT
         FROM SIDA_DB.BRONZE.REVIEWS_VOC_ANALYSIS
         ORDER BY ANALYZED_AT DESC
-    """)
+    """, ttl=60)
     return df
 
 
