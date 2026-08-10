@@ -79,7 +79,33 @@ def category_mapping(product_name: str) -> str:
 # ──────────────────────────────────────────────
 # Snowflake 연결 및 데이터 로드
 # ──────────────────────────────────────────────
-conn = st.connection("snowflake", ttl=os.getenv("SNOWFLAKE_CONNECTION_TTL"))
+# 워크스페이스(내장 세션)와 Streamlit Community Cloud(Key Pair / 비밀번호)를
+# 모두 지원한다. secrets에 private_key가 있으면 Key Pair 인증으로 연결한다.
+def _get_connection():
+    private_key_text = None
+    try:
+        private_key_text = st.secrets["connections"]["snowflake"].get("private_key")
+    except Exception:
+        pass
+
+    if private_key_text:
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+
+        p_key = serialization.load_pem_private_key(
+            private_key_text.encode("utf-8"), password=None, backend=default_backend()
+        )
+        private_key_der = p_key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        return st.connection("snowflake", private_key=private_key_der)
+
+    return st.connection("snowflake", ttl=os.getenv("SNOWFLAKE_CONNECTION_TTL"))
+
+
+conn = _get_connection()
 
 
 @st.cache_data(ttl=60)
