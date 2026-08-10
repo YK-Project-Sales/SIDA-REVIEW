@@ -74,7 +74,7 @@ private_key_der = p_key.private_bytes(
 conn = st.connection("snowflake", private_key=private_key_der)
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=60)
 def load_data():
     df = conn.query("""
         SELECT REVIEW_CODE, PRODUCT_CODE, PRODUCT_NAME, TEXT,
