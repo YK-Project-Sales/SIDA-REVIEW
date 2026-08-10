@@ -2,14 +2,14 @@
 # Co-authored with CoCo
 # -*- coding: utf-8 -*-
 """
-Review Insight Copilot v5
-- Snowflake REVIEWS_VOC_ANALYSIS 테이블 연동
-- claude-4-sonnet 기반 감성/부정카테고리/VOC/분류사유 분석
-- 카테고리 매핑, 월별 추이, 평점 분석, 색상 하이라이팅 (실무 기능 강화)
+Review Insight Copilot v6
+- 모든 분석 판단은 Snowflake Cortex LLM(claude-4-sonnet)이 수행
+  · 감성 / 부정카테고리 / VOC / 분류사유 / 상품카테고리 / 재구매의향 / 핵심키워드
+- 룰베이스(키워드 매칭, 정규식) 로직 없음
+- 시각화 구성과 분석 관점은 app_0804 기준을 계승
 """
 
 import os
-import re
 from collections import Counter
 
 import altair as alt
@@ -49,38 +49,11 @@ st.markdown(
 SENT_DOMAIN = ["긍정", "중립", "부정"]
 SENT_RANGE = ["#2563eb", "#94a3b8", "#dc2626"]
 
-STOP_WORDS = {
-    "좋아요", "있어요", "합니다", "너무", "정말", "제품", "사용",
-    "같아요", "그리고", "해서", "했는데", "인데", "해요", "이에요",
-    "구매", "주문", "상품", "아이", "좋아", "잘써", "써요",
-}
-
-REPURCHASE_KEYWORDS = ["재구매", "또 구매", "또 주문", "계속 사용", "계속 구매", "또 살", "N번째"]
-
-# 상품명 → 카테고리 매핑 규칙
-CATEGORY_RULES = {
-    "선케어": ["선크림", "선스틱", "선쿠션", "선스프레이", "선클렌징", "자외선", "썬"],
-    "스킨케어": ["로션", "크림", "에센셜", "보습", "판테딘", "더마", "스킨케어", "오일", "misc"],
-    "구강케어": ["칫솔", "치약", "구강", "가글"],
-    "수유용품": ["젖병", "젖꼭지", "수유", "분유", "빨대컵"],
-    "위생용품": ["티슈", "물티슈", "소독", "위생매트", "기저귀"],
-    "세정/생활": ["세제", "washing", "클렌저", "워시", "폼", "샴푸", "바디"],
-}
-
-
-def category_mapping(product_name: str) -> str:
-    name = (product_name or "").lower()
-    for cat, keywords in CATEGORY_RULES.items():
-        if any(k.lower() in name for k in keywords):
-            return cat
-    return "기타"
-
 
 # ──────────────────────────────────────────────
-# Snowflake 연결 및 데이터 로드
+# Snowflake 연결
 # ──────────────────────────────────────────────
-# 워크스페이스(내장 세션)와 Streamlit Community Cloud(Key Pair / 비밀번호)를
-# 모두 지원한다. secrets에 private_key가 있으면 Key Pair 인증으로 연결한다.
+# 워크스페이스(내장 세션)와 Streamlit Community Cloud(Key Pair)를 모두 지원
 def _get_connection():
     private_key_text = None
     try:
@@ -113,12 +86,11 @@ def load_data():
     df = conn.query("""
         SELECT REVIEW_CODE, PRODUCT_CODE, PRODUCT_NAME, TEXT, RATING, CREATED_DATE,
                SENTIMENT, NEGATIVE_CATEGORY, VOC, CLASSIFICATION_REASON,
-               ANALYZED_AT
+               PRODUCT_CATEGORY, REPURCHASE_INTENT, KEYWORDS, ANALYZED_AT
         FROM SIDA_DB.BRONZE.REVIEWS_VOC_ANALYSIS
         ORDER BY ANALYZED_AT DESC
     """, ttl=60)
 
-    df["카테고리"] = df["PRODUCT_NAME"].apply(category_mapping)
     df["_날짜"] = pd.to_datetime(
         df["CREATED_DATE"].str.replace(r"\.$", "", regex=True),
         format="%Y.%m.%d. %H:%M:%S",
@@ -147,35 +119,37 @@ if df.empty:
     st.stop()
 
 # ──────────────────────────────────────────────
-# 사이드바 필터
+# 사이드바 필터 (모두 LLM 분석 결과 기반)
 # ──────────────────────────────────────────────
 with st.sidebar:
     st.header("🔎 필터")
 
     sel_category = st.selectbox(
-        "카테고리", ["전체"] + sorted(df["카테고리"].unique().tolist())
+        "상품카테고리", ["전체"] + sorted(df["PRODUCT_CATEGORY"].dropna().unique().tolist())
     )
     sel_sentiment = st.selectbox("감성", ["전체", "긍정", "중립", "부정"])
-
-    voc_list = sorted(df["VOC"].dropna().unique())
-    sel_voc = st.selectbox("VOC", ["전체"] + voc_list)
-
-    neg_cats = sorted(df["NEGATIVE_CATEGORY"].dropna().unique())
-    sel_neg_cat = st.selectbox("부정카테고리", ["전체"] + neg_cats)
+    sel_voc = st.selectbox("VOC", ["전체"] + sorted(df["VOC"].dropna().unique().tolist()))
+    sel_neg_cat = st.selectbox(
+        "부정카테고리", ["전체"] + sorted(df["NEGATIVE_CATEGORY"].dropna().unique().tolist())
+    )
+    sel_repurchase = st.selectbox("재구매의향", ["전체", "있음", "없음", "불명"])
 
     st.divider()
-    products = sorted(df["PRODUCT_NAME"].dropna().unique())
-    sel_products = st.multiselect("특정 상품만 보기", products, default=[])
+    sel_products = st.multiselect(
+        "특정 상품만 보기", sorted(df["PRODUCT_NAME"].dropna().unique()), default=[]
+    )
 
 filtered_df = df.copy()
 if sel_category != "전체":
-    filtered_df = filtered_df[filtered_df["카테고리"] == sel_category]
+    filtered_df = filtered_df[filtered_df["PRODUCT_CATEGORY"] == sel_category]
 if sel_sentiment != "전체":
     filtered_df = filtered_df[filtered_df["SENTIMENT"] == sel_sentiment]
 if sel_voc != "전체":
     filtered_df = filtered_df[filtered_df["VOC"] == sel_voc]
 if sel_neg_cat != "전체":
     filtered_df = filtered_df[filtered_df["NEGATIVE_CATEGORY"] == sel_neg_cat]
+if sel_repurchase != "전체":
+    filtered_df = filtered_df[filtered_df["REPURCHASE_INTENT"] == sel_repurchase]
 if sel_products:
     filtered_df = filtered_df[filtered_df["PRODUCT_NAME"].isin(sel_products)]
 
@@ -184,7 +158,7 @@ if filtered_df.empty:
     st.stop()
 
 # ──────────────────────────────────────────────
-# KPI
+# KPI (LLM 판정 결과 집계)
 # ──────────────────────────────────────────────
 total = len(filtered_df)
 positive = int((filtered_df["SENTIMENT"] == "긍정").sum())
@@ -193,12 +167,8 @@ neutral = int((filtered_df["SENTIMENT"] == "중립").sum())
 positive_rate = round(positive / total * 100, 1) if total else 0
 avg_rating = round(filtered_df["RATING"].mean(), 2) if total else 0
 
-repurchase_count = int(
-    filtered_df["TEXT"].fillna("").apply(
-        lambda x: any(k in x for k in REPURCHASE_KEYWORDS)
-    ).sum()
-)
-repurchase_rate = round(repurchase_count / total * 100, 1) if total else 0
+repurchase_yes = int((filtered_df["REPURCHASE_INTENT"] == "있음").sum())
+repurchase_rate = round(repurchase_yes / total * 100, 1) if total else 0
 
 k1, k2, k3, k4, k5, k6 = st.columns(6)
 k1.metric("전체 리뷰", f"{total:,}")
@@ -209,11 +179,23 @@ k5.metric("평균 평점", f"{avg_rating}⭐")
 k6.metric("재구매 의향", f"{repurchase_rate}%")
 
 # ──────────────────────────────────────────────
-# 탭 구조
+# 탭
 # ──────────────────────────────────────────────
 tab_dash, tab_voc, tab_product, tab_review, tab_insight = st.tabs(
     ["📈 대시보드", "🚨 VOC 분석", "📦 상품 분석", "📝 리뷰 상세", "💡 인사이트"]
 )
+
+
+def llm_keyword_counter(series: pd.Series) -> Counter:
+    """LLM이 추출한 핵심키워드 컬럼을 집계한다."""
+    bag = []
+    for kw_str in series.dropna():
+        for kw in str(kw_str).split(","):
+            cleaned = kw.strip().strip("{}")
+            if cleaned:
+                bag.append(cleaned)
+    return Counter(bag)
+
 
 # ── 대시보드 ──
 with tab_dash:
@@ -232,17 +214,17 @@ with tab_dash:
         st.altair_chart(chart, use_container_width=True)
 
     with c2:
-        st.subheader("카테고리별 리뷰 수")
-        cat_count = filtered_df.groupby("카테고리").size().reset_index(name="리뷰수")
+        st.subheader("상품카테고리별 리뷰 수")
+        cat_count = filtered_df.groupby("PRODUCT_CATEGORY").size().reset_index(name="리뷰수")
+        cat_count.columns = ["상품카테고리", "리뷰수"]
         chart = alt.Chart(cat_count).mark_bar().encode(
             x=alt.X("리뷰수:Q"),
-            y=alt.Y("카테고리:N", sort="-x"),
-            color=alt.Color("카테고리:N", legend=None),
-            tooltip=["카테고리", "리뷰수"],
+            y=alt.Y("상품카테고리:N", sort="-x"),
+            color=alt.Color("상품카테고리:N", legend=None),
+            tooltip=["상품카테고리", "리뷰수"],
         ).properties(height=300)
         st.altair_chart(chart, use_container_width=True)
 
-    # 월별 감성 추이
     if filtered_df["_날짜"].notna().any():
         st.subheader("월별 감성 추이")
         trend = (
@@ -259,24 +241,25 @@ with tab_dash:
         ).properties(height=300)
         st.altair_chart(chart, use_container_width=True)
 
-    # 카테고리별 평균 평점
     c3, c4 = st.columns([2, 3])
     with c3:
         st.subheader("카테고리별 평균 평점")
         rating_df = (
-            filtered_df.groupby("카테고리")
+            filtered_df.groupby("PRODUCT_CATEGORY")
             .agg(평균평점=("RATING", "mean"), 리뷰수=("RATING", "count"))
             .reset_index()
+            .rename(columns={"PRODUCT_CATEGORY": "상품카테고리"})
         )
         rating_df["평균평점"] = rating_df["평균평점"].round(2)
-        rating_df = rating_df.sort_values("평균평점", ascending=False)
-        st.dataframe(rating_df, use_container_width=True, hide_index=True)
+        st.dataframe(
+            rating_df.sort_values("평균평점", ascending=False),
+            use_container_width=True, hide_index=True,
+        )
 
     with c4:
-        st.subheader("🔥 TOP 키워드")
-        text_blob = " ".join(filtered_df["TEXT"].fillna(""))
-        words = [w for w in re.findall(r"[가-힣]{2,}", text_blob) if w not in STOP_WORDS]
-        keyword_df = pd.DataFrame(Counter(words).most_common(15), columns=["키워드", "빈도"])
+        st.subheader("🔥 핵심키워드 TOP 15 (LLM 추출)")
+        kw_counter = llm_keyword_counter(filtered_df["KEYWORDS"])
+        keyword_df = pd.DataFrame(kw_counter.most_common(15), columns=["키워드", "빈도"])
         if not keyword_df.empty:
             chart = alt.Chart(keyword_df).mark_bar().encode(
                 x=alt.X("빈도:Q"),
@@ -309,8 +292,10 @@ with tab_voc:
             .reset_index()
         )
         voc_neg["부정률(%)"] = (voc_neg["부정"] / voc_neg["전체"] * 100).round(1)
-        voc_neg = voc_neg.sort_values("부정률(%)", ascending=False)
-        st.dataframe(voc_neg, use_container_width=True, hide_index=True, height=350)
+        st.dataframe(
+            voc_neg.sort_values("부정률(%)", ascending=False),
+            use_container_width=True, hide_index=True, height=350,
+        )
 
     st.subheader("VOC × 감성 교차 분석")
     voc_sent = filtered_df.groupby(["VOC", "SENTIMENT"]).size().reset_index(name="건수")
@@ -344,13 +329,16 @@ with tab_product:
         filtered_df.groupby("PRODUCT_NAME")
         .agg(리뷰수=("REVIEW_CODE", "count"),
              평균평점=("RATING", "mean"),
-             부정=("SENTIMENT", lambda x: (x == "부정").sum()))
+             부정=("SENTIMENT", lambda x: (x == "부정").sum()),
+             재구매의향=("REPURCHASE_INTENT", lambda x: (x == "있음").sum()))
         .reset_index()
         .rename(columns={"PRODUCT_NAME": "상품명"})
     )
     product_df["평균평점"] = product_df["평균평점"].round(2)
-    product_df = product_df.sort_values("리뷰수", ascending=False).head(20)
-    st.dataframe(product_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        product_df.sort_values("리뷰수", ascending=False).head(20),
+        use_container_width=True, hide_index=True,
+    )
 
     st.subheader("⚠️ 상품 위험도 (부정 리뷰 비율)")
     min_reviews = st.slider(
@@ -380,11 +368,12 @@ with tab_review:
     search = st.text_input("리뷰 내 키워드 검색", placeholder="예: 배송, 트러블, 백탁")
 
     view_df = filtered_df[[
-        "SENTIMENT", "카테고리", "VOC", "NEGATIVE_CATEGORY",
-        "PRODUCT_NAME", "TEXT", "CLASSIFICATION_REASON", "RATING"
+        "SENTIMENT", "PRODUCT_CATEGORY", "VOC", "NEGATIVE_CATEGORY", "REPURCHASE_INTENT",
+        "PRODUCT_NAME", "TEXT", "KEYWORDS", "CLASSIFICATION_REASON", "RATING"
     ]].rename(columns={
-        "SENTIMENT": "감성", "VOC": "VOC", "NEGATIVE_CATEGORY": "부정카테고리",
-        "PRODUCT_NAME": "상품명", "TEXT": "리뷰",
+        "SENTIMENT": "감성", "PRODUCT_CATEGORY": "상품카테고리",
+        "NEGATIVE_CATEGORY": "부정카테고리", "REPURCHASE_INTENT": "재구매의향",
+        "PRODUCT_NAME": "상품명", "TEXT": "리뷰", "KEYWORDS": "핵심키워드",
         "CLASSIFICATION_REASON": "분류사유", "RATING": "평점",
     })
     if search:
@@ -424,20 +413,23 @@ with tab_insight:
     else:
         st.error(f"긍정률 {positive_rate}% — 만족도 개선이 시급합니다.")
 
+    st.caption(
+        f"재구매 의향 명시 {repurchase_yes:,}건 ({repurchase_rate}%) · "
+        f"평균 평점 {avg_rating}⭐"
+    )
+
     st.subheader("🎯 개선 우선순위 (부정 리뷰가 집중된 VOC)")
     neg_only = filtered_df[filtered_df["SENTIMENT"] == "부정"]
     if neg_only.empty:
         st.write("부정 리뷰가 없어 우선순위를 산출할 수 없습니다.")
     else:
-        voc_neg_count = neg_only["VOC"].value_counts()
-        for rank, (voc, cnt) in enumerate(voc_neg_count.head(5).items(), start=1):
+        for rank, (voc, cnt) in enumerate(neg_only["VOC"].value_counts().head(5).items(), start=1):
             sub = neg_only[neg_only["VOC"] == voc]
-            blob = " ".join(sub["TEXT"].fillna(""))
-            kw = [w for w in re.findall(r"[가-힣]{2,}", blob) if w not in STOP_WORDS]
-            top_kw = ", ".join(w for w, _ in Counter(kw).most_common(5))
+            kw_counter = llm_keyword_counter(sub["KEYWORDS"])
+            top_kw = ", ".join(w for w, _ in kw_counter.most_common(5))
             st.markdown(f"**{rank}위 — {voc}** (부정 {cnt}건)")
             if top_kw:
-                st.caption(f"관련 키워드: {top_kw}")
+                st.caption(f"LLM 추출 키워드: {top_kw}")
             for reason in sub["CLASSIFICATION_REASON"].head(2):
                 if reason:
                     st.markdown(f"  - _{reason}_")
@@ -449,6 +441,12 @@ with tab_insight:
         cat_rank.columns = ["부정카테고리", "건수"]
         cat_rank["비중(%)"] = (cat_rank["건수"] / cat_rank["건수"].sum() * 100).round(1)
         st.dataframe(cat_rank, use_container_width=True, hide_index=True)
+
+    st.subheader("🔁 재구매 의향 분포")
+    rep_dist = filtered_df["REPURCHASE_INTENT"].value_counts().reset_index()
+    rep_dist.columns = ["재구매의향", "건수"]
+    rep_dist["비중(%)"] = (rep_dist["건수"] / rep_dist["건수"].sum() * 100).round(1)
+    st.dataframe(rep_dist, use_container_width=True, hide_index=True)
 
     st.subheader("⚠️ 주의 상품")
     watch = risk_df[risk_df["위험도(%)"] >= 30].head(5)
