@@ -20,7 +20,7 @@ import streamlit as st
 # 기본 설정
 # ──────────────────────────────────────────────
 st.set_page_config(
-    page_title="Review Insight Copilot",
+    page_title="Review Insight Intelligence Dashboard",
     page_icon="📊",
     layout="wide",
 )
