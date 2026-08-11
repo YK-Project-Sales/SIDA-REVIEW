@@ -123,10 +123,24 @@ if df.empty:
 # ──────────────────────────────────────────────
 with st.sidebar:
     st.header("🔎 필터")
+    st.subheader("📅 기간")
 
-    sel_category = st.selectbox(
-        "상품카테고리", ["전체"] + sorted(df["PRODUCT_CATEGORY"].dropna().unique().tolist())
+    min_date = df["_날짜"].min().date()
+    max_date = df["_날짜"].max().date()
+
+    date_range = st.date_input(
+        "리뷰 작성일",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date,
     )
+
+    st.divider()
+    sel_category = st.multiselect(
+    "상품카테고리",
+    sorted(df["PRODUCT_CATEGORY"].dropna().unique().tolist()),
+    default=[]
+)
     sel_sentiment = st.selectbox("감성", ["전체", "긍정", "중립", "부정"])
     sel_voc = st.selectbox("VOC", ["전체"] + sorted(df["VOC"].dropna().unique().tolist()))
     sel_neg_cat = st.selectbox(
@@ -140,8 +154,20 @@ with st.sidebar:
     )
 
 filtered_df = df.copy()
-if sel_category != "전체":
-    filtered_df = filtered_df[filtered_df["PRODUCT_CATEGORY"] == sel_category]
+# 기간 필터
+if len(date_range) == 2:
+    start_date, end_date = date_range
+
+    filtered_df = filtered_df[
+        (filtered_df["_날짜"].dt.date >= start_date)
+        & (filtered_df["_날짜"].dt.date <= end_date)
+    ]
+
+# 상품카테고리 다중선택
+if sel_category:
+    filtered_df = filtered_df[
+        filtered_df["PRODUCT_CATEGORY"].isin(sel_category)
+    ]
 if sel_sentiment != "전체":
     filtered_df = filtered_df[filtered_df["SENTIMENT"] == sel_sentiment]
 if sel_voc != "전체":
@@ -150,8 +176,26 @@ if sel_neg_cat != "전체":
     filtered_df = filtered_df[filtered_df["NEGATIVE_CATEGORY"] == sel_neg_cat]
 if sel_repurchase != "전체":
     filtered_df = filtered_df[filtered_df["REPURCHASE_INTENT"] == sel_repurchase]
-if sel_products:
-    filtered_df = filtered_df[filtered_df["PRODUCT_NAME"].isin(sel_products)]
+product_search = st.text_input(
+    "상품 검색",
+    placeholder="상품명 입력"
+)
+
+product_list = sorted(
+    df["PRODUCT_NAME"].dropna().unique().tolist()
+)
+
+if product_search:
+    product_list = [
+        p for p in product_list
+        if product_search.lower() in p.lower()
+    ]
+
+sel_products = st.multiselect(
+    "상품 선택",
+    product_list,
+    default=[]
+)
 
 if filtered_df.empty:
     st.warning("조건에 맞는 리뷰가 없습니다. 필터를 조정해주세요.")
