@@ -153,6 +153,9 @@ with st.sidebar:
         "특정 상품만 보기", sorted(df["PRODUCT_NAME"].dropna().unique()), default=[]
     )
 
+product_list = sorted(
+    df["PRODUCT_NAME"].dropna().unique().tolist()
+)
 filtered_df = df.copy()
 # 기간 필터
 if len(date_range) == 2:
@@ -180,11 +183,6 @@ product_search = st.text_input(
     "상품 검색",
     placeholder="상품명 입력"
 )
-
-product_list = sorted(
-    df["PRODUCT_NAME"].dropna().unique().tolist()
-)
-
 if product_search:
     product_list = [
         p for p in product_list
