@@ -123,6 +123,7 @@ if df.empty:
 # ──────────────────────────────────────────────
 with st.sidebar:
     st.header("🔎 필터")
+
     st.subheader("📅 기간")
 
     min_date = df["_날짜"].min().date()
@@ -137,21 +138,51 @@ with st.sidebar:
 
     st.divider()
 
-product_search = st.text_input(
-    "상품 검색",
-    placeholder="상품명 입력"
-)
-if product_search:
-    product_list = [
-        p for p in product_list
-        if product_search.lower() in p.lower()
-    ]
+    sel_category = st.multiselect(
+        "상품카테고리",
+        sorted(df["PRODUCT_CATEGORY"].dropna().unique().tolist()),
+        default=[]
+    )
 
-sel_products = st.multiselect(
-    "상품 선택",
-    product_list,
-    default=[]
-)
+    sel_sentiment = st.selectbox(
+        "감성",
+        ["전체", "긍정", "중립", "부정"]
+    )
+
+    sel_voc = st.selectbox(
+        "VOC",
+        ["전체"] + sorted(df["VOC"].dropna().unique().tolist())
+    )
+
+    sel_neg_cat = st.selectbox(
+        "부정카테고리",
+        ["전체"] + sorted["전체", "긍정", "중립", "(df["NEGATIVE_CATEGORY"].dropna().unique    sel_repurchase = st.selectbox(
+        "재구매의향",
+        ["전체", "있음", "없음", "불명"]
+    )
+
+    st.divider()
+
+    product_search = st.text_input(
+        "상품 검색",
+        placeholder="상품명 입력"
+    )
+
+    product_list = sorted(
+        df["PRODUCT_NAME"].dropna().unique().tolist()
+    )
+
+    if product_search:
+        product_list = [
+            p for p in product_list
+            if product_search.lower() in p.lower()
+        ]
+
+    sel_products = st.multiselect(
+        "상품 선택",
+        product_list,
+        default=[]
+    )
 
   
 
