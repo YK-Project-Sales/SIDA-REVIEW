@@ -136,7 +136,26 @@ with st.sidebar:
     )
 
     st.divider()
-    sel_category = st.multiselect(
+
+product_search = st.text_input(
+    "상품 검색",
+    placeholder="상품명 입력"
+)
+if product_search:
+    product_list = [
+        p for p in product_list
+        if product_search.lower() in p.lower()
+    ]
+
+sel_products = st.multiselect(
+    "상품 선택",
+    product_list,
+    default=[]
+)
+
+  
+
+sel_category = st.multiselect(
     "상품카테고리",
     sorted(df["PRODUCT_CATEGORY"].dropna().unique().tolist()),
     default=[]
@@ -179,21 +198,6 @@ if sel_neg_cat != "전체":
     filtered_df = filtered_df[filtered_df["NEGATIVE_CATEGORY"] == sel_neg_cat]
 if sel_repurchase != "전체":
     filtered_df = filtered_df[filtered_df["REPURCHASE_INTENT"] == sel_repurchase]
-product_search = st.text_input(
-    "상품 검색",
-    placeholder="상품명 입력"
-)
-if product_search:
-    product_list = [
-        p for p in product_list
-        if product_search.lower() in p.lower()
-    ]
-
-sel_products = st.multiselect(
-    "상품 선택",
-    product_list,
-    default=[]
-)
 
 if filtered_df.empty:
     st.warning("조건에 맞는 리뷰가 없습니다. 필터를 조정해주세요.")
